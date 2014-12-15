@@ -1,10 +1,6 @@
 // extern crate tcpsuck;
 
-use std::io::{TcpListener, TcpStream};
-use std::io::{Acceptor, Listener};
-use std::io::{BufferedStream, BufferedWriter};
-use std::sync::{RWLock, Arc};
-use std::collections::HashMap;
+use std::io::{TcpListener, TcpStream, Acceptor, Listener, BufferedStream};
 
 // Has to be a better way to do this?
 use chat_server::ChatServer;
@@ -23,13 +19,14 @@ mod chat_server;
 // * Commands
 // * Timestamps
 // * Convert over usage of Strings to slices
+// * Main should only contain main
 
 // MAYBE
 // * Encryption
 // * Distributed setup
 
 
-
+#[allow(dead_code)]
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:6667");
     let mut acceptor = listener.listen();
@@ -52,8 +49,10 @@ fn main() {
     }
 }
 
+#[allow(dead_code)]
 fn handle_client(server: ChatServer<TcpStream>, stream: TcpStream, tx: Sender<(String, String)>) {
-    let mut copy = stream.clone();
+    // too many clones here
+    let copy = stream.clone();
     let mut stream = BufferedStream::new(stream);
     let name = get_name(&mut stream);
 
@@ -65,6 +64,7 @@ fn handle_client(server: ChatServer<TcpStream>, stream: TcpStream, tx: Sender<(S
     }
 }
 
+#[allow(dead_code)]
 fn get_name(stream: &mut BufferedStream<TcpStream>) -> String {
     stream.write_str("Name: ".as_slice()).unwrap();
     stream.flush().unwrap();

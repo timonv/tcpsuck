@@ -1,5 +1,4 @@
-use std::io::{TcpStream, BufferedWriter};
-use std::io::Stream;
+use std::io::BufferedWriter;
 use std::sync::{RWLock, Arc};
 use std::collections::HashMap;
 
@@ -29,8 +28,10 @@ impl<T: Reader + Writer + Clone> ChatServer<T> {
         let clone = self.clone();
         spawn(move || {
             loop {
-                let (user, message) = rec.recv();
-                clone.broadcast(user, message);
+                match rec.recv_opt() {
+                    Ok( (user, message) ) => clone.broadcast(user, message),
+                    Err(_) => return // Obviously problematic if a client disconnects
+                }
             }
         })
     }
@@ -42,7 +43,6 @@ impl<T: Reader + Writer + Clone> ChatServer<T> {
 
         for (user, stream) in unlocked.iter() {
             if *user != origin { // Why?
-                let mut stream = stream.clone();
                 let mut writer = BufferedWriter::new(stream.clone());
                 writer.write_line(message.as_slice()).unwrap();
                 writer.flush().unwrap();
@@ -68,6 +68,8 @@ mod test {
     use std::io::IoResult;
     use std::sync::{RWLock, Arc};
     use std::str;
+    use std::io::timer::sleep;
+    use std::time::duration::Duration;
 
     #[test]
     fn test_registering_of_user() {
@@ -87,11 +89,17 @@ mod test {
         server.register_user("Pietje".to_string(), pietje.clone());
         let message = "Baby don't hurt me, don't hurt me, no more!";
 
-        let (tx, rx) = sync_channel::<(String, String)>(0);
+        let (tx, rx) = channel::<(String, String)>();
         server.listen_and_broadcast(rx);
         tx.send(("Jantje".to_string(), message.to_string()));
 
         let expected = "[Jantje]: ".to_string() + message.to_string();
+
+        // Should be possible with futures
+        timeout(5, || {
+            pietje.read_output() != ""
+        });
+
         assert_eq!(expected.as_slice(), pietje.read_output().trim());
     }
 
@@ -108,7 +116,6 @@ mod test {
         }
 
         pub fn read_output(&self) -> String {
-            println!("{}", "Reading!");
             self.output.clone().read().clone()
         }
     }
@@ -131,8 +138,6 @@ mod test {
         fn write(&mut self, buf: &[u8]) -> IoResult<()> {
             let mut unlocked = self.output.write();
             *unlocked = str::from_utf8(buf).expect("Test your shizzle, pizzle").to_string();
-            println!("{}", "Writing!");
-            println!("{}", *unlocked);
             Ok(())
         }
     }
@@ -141,5 +146,15 @@ mod test {
         fn clone(&self) -> FakeStream {
             FakeStream { input: self.input.clone(), output: self.output.clone() }
         }
+    }
+
+    fn timeout(max: int, f: || -> bool) -> bool {
+        for _ in range(0, max) {
+            if f() == true {
+                return true
+            }
+            sleep(Duration::milliseconds(100));
+        }
+        panic!("TIMOUT TIMOUT")
     }
 }
