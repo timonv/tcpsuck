@@ -1,30 +1,36 @@
 use std::io::{TcpStream, BufferedWriter};
+use std::io::Stream;
 use std::sync::{RWLock, Arc};
 use std::collections::HashMap;
 
-type SharedUserStreamMap = Arc<RWLock<HashMap<String, TcpStream>>>;
-
-pub struct ChatServer {
-    users: SharedUserStreamMap
+pub struct ChatServer<T: 'static + Reader + Writer> {
+    users: Arc<RWLock<HashMap<String, T>>>
 }
 
-impl ChatServer {
-    pub fn new() -> ChatServer {
-        ChatServer { users: Arc::new(RWLock::new(HashMap::<String, TcpStream>::new())) }
+// Generics are kinda viral...
+impl<T: Reader + Writer + Clone> ChatServer<T> {
+    pub fn new() -> ChatServer<T> {
+        ChatServer { users: Arc::new(RWLock::new(HashMap::<String, T>::new())) }
     }
 
-    pub fn register_user(&self, name: String, stream: TcpStream) {
+    pub fn register_user(&self, name: String, stream: T) {
         let mut streams = self.users.write();
         streams.insert(name, stream);
-        streams.downgrade();
     }
 
+    pub fn is_registered(&self, name: &str) -> bool {
+        // TODO Check if stream is still valid
+        let streams = self.users.read();
+        streams.contains_key(name)
+    }
+
+    // RFC Maybe better to return the senders of the channel here?
     pub fn listen_and_broadcast(&self, rec: Receiver<(String, String)>) {
-        let copy = self.clone();
-        spawn(proc() {
+        let clone = self.clone();
+        spawn(move || {
             loop {
                 let (user, message) = rec.recv();
-                copy.broadcast(user, message);
+                clone.broadcast(user, message);
             }
         })
     }
@@ -36,6 +42,7 @@ impl ChatServer {
 
         for (user, stream) in unlocked.iter() {
             if *user != origin { // Why?
+                let mut stream = stream.clone();
                 let mut writer = BufferedWriter::new(stream.clone());
                 writer.write_line(message.as_slice()).unwrap();
                 writer.flush().unwrap();
@@ -49,8 +56,90 @@ impl ChatServer {
 }
 
 // TODO Remove need for this by doing everything over spawns with channels
-impl Clone for ChatServer {
-    fn clone(&self) -> ChatServer {
+impl<T: Reader + Writer>Clone for ChatServer<T> {
+    fn clone(&self) -> ChatServer<T> {
         ChatServer { users: self.users.clone() }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::ChatServer;
+    use std::io::IoResult;
+    use std::sync::{RWLock, Arc};
+    use std::str;
+
+    #[test]
+    fn test_registering_of_user() {
+        let server = ChatServer::new();
+        let stream = FakeStream::new();
+
+        server.register_user("Pietje".to_string(), stream);
+
+        assert!(server.is_registered("Pietje"))
+    }
+
+    #[test]
+    fn test_broadcasting_a_message() {
+        let server = ChatServer::new();
+        let pietje = FakeStream::new();
+
+        server.register_user("Pietje".to_string(), pietje.clone());
+        let message = "Baby don't hurt me, don't hurt me, no more!";
+
+        let (tx, rx) = sync_channel::<(String, String)>(0);
+        server.listen_and_broadcast(rx);
+        tx.send(("Jantje".to_string(), message.to_string()));
+
+        let expected = "[Jantje]: ".to_string() + message.to_string();
+        assert_eq!(expected.as_slice(), pietje.read_output().trim());
+    }
+
+    struct FakeStream {
+        input: String,
+        output: Arc<RWLock<String>>
+    }
+
+    impl FakeStream {
+        pub fn new() -> FakeStream {
+            // Because when we clone, we it to reference the same output stream (as a TcpConnection
+            // would)
+            FakeStream { input: String::new(), output: Arc::new(RWLock::new(String::new()))}
+        }
+
+        pub fn read_output(&self) -> String {
+            println!("{}", "Reading!");
+            self.output.clone().read().clone()
+        }
+    }
+
+    impl Reader for FakeStream {
+        fn read(&mut self, buf: &mut [u8]) -> IoResult<uint> {
+            let mut len = 0;
+            // THIS IS GENIUS
+            for (slot, byte) in buf.iter_mut().zip(self.input.as_bytes().iter())  {
+                *slot = *byte;
+                len += 1;
+            }
+
+            Ok(len)
+        }
+
+    }
+
+    impl Writer for FakeStream {
+        fn write(&mut self, buf: &[u8]) -> IoResult<()> {
+            let mut unlocked = self.output.write();
+            *unlocked = str::from_utf8(buf).expect("Test your shizzle, pizzle").to_string();
+            println!("{}", "Writing!");
+            println!("{}", *unlocked);
+            Ok(())
+        }
+    }
+
+    impl Clone for FakeStream {
+        fn clone(&self) -> FakeStream {
+            FakeStream { input: self.input.clone(), output: self.output.clone() }
+        }
     }
 }

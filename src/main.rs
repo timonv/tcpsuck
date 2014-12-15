@@ -22,6 +22,7 @@ mod chat_server;
 // * Better UI
 // * Commands
 // * Timestamps
+// * Convert over usage of Strings to slices
 
 // MAYBE
 // * Encryption
@@ -35,7 +36,7 @@ fn main() {
 
     // Used for passing chat messages between threads
     let (tx, rx) = channel::<(String, String)>();
-    let server = ChatServer::new();
+    let server = ChatServer::<TcpStream>::new();
 
     server.listen_and_broadcast(rx);
 
@@ -45,13 +46,13 @@ fn main() {
 
         // We can refactor this to channels, or encapsulate the clone, abstracting over
         // concurrency, or both.
-        spawn(proc() {
+        spawn(move || {
             handle_client(server_copy, stream.unwrap(), txc)
         })
     }
 }
 
-fn handle_client(server: ChatServer, stream: TcpStream, tx: Sender<(String, String)>) {
+fn handle_client(server: ChatServer<TcpStream>, stream: TcpStream, tx: Sender<(String, String)>) {
     let mut copy = stream.clone();
     let mut stream = BufferedStream::new(stream);
     let name = get_name(&mut stream);
