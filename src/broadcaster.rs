@@ -2,14 +2,14 @@ use std::io::BufferedWriter;
 use std::sync::{RWLock, Arc};
 use std::collections::HashMap;
 
-pub struct ChatServer<T: 'static + Reader + Writer> {
+pub struct Broadcaster<T: 'static + Reader + Writer> {
     users: Arc<RWLock<HashMap<String, T>>>
 }
 
 // Generics are kinda viral...
-impl<T: Reader + Writer + Clone> ChatServer<T> {
-    pub fn new() -> ChatServer<T> {
-        ChatServer { users: Arc::new(RWLock::new(HashMap::<String, T>::new())) }
+impl<T: Reader + Writer + Clone> Broadcaster<T> {
+    pub fn new() -> Broadcaster<T> {
+        Broadcaster { users: Arc::new(RWLock::new(HashMap::<String, T>::new())) }
     }
 
     pub fn register_user(&self, name: String, stream: T) {
@@ -56,15 +56,15 @@ impl<T: Reader + Writer + Clone> ChatServer<T> {
 }
 
 // TODO Remove need for this by doing everything over spawns with channels
-impl<T: Reader + Writer>Clone for ChatServer<T> {
-    fn clone(&self) -> ChatServer<T> {
-        ChatServer { users: self.users.clone() }
+impl<T: Reader + Writer>Clone for Broadcaster<T> {
+    fn clone(&self) -> Broadcaster<T> {
+        Broadcaster { users: self.users.clone() }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use super::ChatServer;
+    use super::Broadcaster;
     use std::io::IoResult;
     use std::sync::{RWLock, Arc};
     use std::str;
@@ -73,7 +73,7 @@ mod test {
 
     #[test]
     fn test_registering_of_user() {
-        let server = ChatServer::new();
+        let server = Broadcaster::new();
         let stream = FakeStream::new();
 
         server.register_user("Pietje".to_string(), stream);
@@ -83,7 +83,7 @@ mod test {
 
     #[test]
     fn test_broadcasting_a_message() {
-        let server = ChatServer::new();
+        let server = Broadcaster::new();
         let pietje = FakeStream::new();
 
         server.register_user("Pietje".to_string(), pietje.clone());
